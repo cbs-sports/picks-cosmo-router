@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     -X 'github.com/wundergraph/cosmo/router/core.Version=${VERSION}' \
     -X 'github.com/wundergraph/cosmo/router/core.Commit=${COMMIT}' \
     -X 'github.com/wundergraph/cosmo/router/core.Date=${DATE}'" \
-    -a -o router cmd/custom/main.go
+    -a -o router cmd/custom-cache-control/main.go
 
 FROM gcr.io/distroless/static:latest
 

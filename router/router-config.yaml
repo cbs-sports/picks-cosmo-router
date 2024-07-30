@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/wundergraph/cosmo/router%400.67.0/router/pkg/config/config.schema.json
+version: "1"
+
+log_level: "info"
+
+modules:
+  cacheControl:
+    enabled: true
+
+overrides:
+  subgraphs:
+    picks2:
+      routing_url: https://server-subgraph.dev.picks.cbssports.cloud/graphql
+      subscription_url: http://router:3002/graphql/ws
+      subscription_protocol: ws
+      subscription_websocket_subprotocol: graphql-ws
+    picks-legacy:
+      routing_url: https://legacy-subgraph.dev.picks.cbssports.cloud/graphql
+      subscription_url: http://router:3002/graphql/ws
+      subscription_protocol: ws
+      subscription_websocket_subprotocol: graphql-ws
+
+telemetry:
+  service_name: "picks-router-local"
+  metrics:
+    prometheus:
+      enabled: true
+      path: "/metrics"
+      listen_addr: "127.0.0.1:8088"
+      exclude_metrics: []
+      exclude_metric_labels: []
