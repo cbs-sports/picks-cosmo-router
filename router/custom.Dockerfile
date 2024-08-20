@@ -1,4 +1,5 @@
-FROM golang:1.23 as builder
+FROM segment/chamber:2.12.0 AS chamber
+FROM golang:1.23 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -36,6 +37,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM gcr.io/distroless/static:latest
 
+COPY --from=chamber /chamber /bin/chamber
 COPY --from=builder /app/router /router
 
 ENTRYPOINT ["/router"]
