@@ -35,7 +35,7 @@ func (ccl CacheControlValue) String() string {
 
 func (m *CacheControlModule) Provision(ctx *core.ModuleContext) error {
 	if !m.Enabled {
-		ctx.Logger.Info("CacheControlModule is disabled")
+		ctx.Logger.Warn("CacheControlModule is disabled")
 		return nil
 	}
 
