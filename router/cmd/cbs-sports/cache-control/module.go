@@ -54,7 +54,7 @@ func (m *CacheControlModule) OnOriginResponse(response *http.Response, ctx core.
 
 	currentCacheControlValue := getCacheControlValue(response.Header)
 	selectedCacheControlValue := currentCacheControlValue
-
+	m.Logger.Info(fmt.Sprintf("CacheControlModule: cache-control value %s", currentCacheControlValue))
 	if prevCacheControlValue != "" {
 		selectedCacheControlValue = getMostRestrictiveHeader(prevCacheControlValue, currentCacheControlValue)
 	}

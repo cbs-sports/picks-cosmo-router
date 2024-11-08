@@ -4,7 +4,7 @@ FROM golang:1.23 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG COMMIT
-ARG DATE
+ARG DATE=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 
 ARG VERSION=dev
 ENV VERSION=$VERSION
@@ -28,12 +28,11 @@ COPY . .
 RUN go test -v ./...
 
 # Build router
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-extldflags=-static \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-extldflags=-static \
     -X 'github.com/wundergraph/cosmo/router/core.Version=${VERSION}' \
-    -X 'github.com/wundergraph/cosmo/router/core.Commit=${COMMIT}' \
+    # -X 'github.com/wundergraph/cosmo/router/core.Commit=${COMMIT}' \
     -X 'github.com/wundergraph/cosmo/router/core.Date=${DATE}'" \
-    -a -o router cmd/custom-cache-control/main.go
+    -a -o router cmd/cbs-sports/main.go
 
 FROM gcr.io/distroless/static:latest
 
