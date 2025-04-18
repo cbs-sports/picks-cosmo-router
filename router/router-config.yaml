@@ -2,25 +2,28 @@
 version: "1"
 
 log_level: "info"
-
 modules:
   auth:
     enabled: true
-  cacheControl:
-    enabled: false
 
 cache_control_policy:
   enabled: true
 
+automatic_persisted_queries:
+  enabled: true
+  cache:
+    size: 1024MB
+    ttl: 0
+
 overrides:
   subgraphs:
     picks2:
-      routing_url: https://server-subgraph.qa.picks.cbssports.cloud/graphql
+      routing_url: https://server-subgraph.dev.picks.cbssports.cloud/graphql
       subscription_url: http://router:3002/graphql/ws
       subscription_protocol: ws
       subscription_websocket_subprotocol: graphql-ws
     picks-legacy:
-      routing_url: https://legacy-subgraph.qa.picks.cbssports.cloud/graphql
+      routing_url: https://legacy-subgraph.dev.picks.cbssports.cloud/graphql
       subscription_url: http://router:3002/graphql/ws
       subscription_protocol: ws
       subscription_websocket_subprotocol: graphql-ws

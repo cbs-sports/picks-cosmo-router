@@ -66,8 +66,6 @@ require (
 	github.com/expr-lang/expr v1.17.0
 	github.com/goccy/go-json v0.10.3
 	github.com/iancoleman/strcase v0.3.0
-	github.com/expr-lang/expr v1.16.9
-	github.com/fsnotify/fsnotify v1.7.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/klauspost/compress v1.17.9
 	github.com/mark3labs/mcp-go v0.21.1
