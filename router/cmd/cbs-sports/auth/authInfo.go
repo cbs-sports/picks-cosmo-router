@@ -89,7 +89,12 @@ func (c pidCookie) decrypt() (string, error) {
 		return "", errors.New("SAPI_ENCRYPTED_PID_TOKEN_IV env variable not found")
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(c.pid)
+	unscapedPid, err := url.QueryUnescape(c.pid)
+	if err != nil {
+		return "", fmt.Errorf("error when unscaping pid cookie: %v", err)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(unscapedPid)
 	if err != nil {
 		return "", fmt.Errorf("error when decoding encrypted pid cookie: %v", err)
 	}
@@ -111,7 +116,11 @@ func (c pidCookie) decrypt() (string, error) {
 		return "", fmt.Errorf("error while unpadding ciper text: %v", err)
 	}
 
-	return string(decoded), nil
+	var userLogin string
+	if parts := bytes.SplitN(decoded, []byte{'|'}, 2); len(parts) > 0 {
+		userLogin = string(parts[0])
+	}
+	return string(userLogin), nil
 }
 
 func (c pidCookie) decryptLegacy() (string, error) {
