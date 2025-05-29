@@ -1,4 +1,3 @@
-FROM segment/chamber:2.12.0 AS chamber
 FROM golang:1.23 AS builder
 
 ARG TARGETOS
@@ -36,7 +35,6 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-extldflags=-static \
 
 FROM gcr.io/distroless/static:latest
 
-COPY --from=chamber /chamber /bin/chamber
 COPY --from=builder /app/router /router
 
 ENTRYPOINT ["/router"]
