@@ -7,7 +7,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/goccy/go-yaml"
-	"github.com/joho/godotenv"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/wundergraph/cosmo/router/internal/unique"
 	"github.com/wundergraph/cosmo/router/pkg/otel/otelconfig"
@@ -73,6 +73,7 @@ type Tracing struct {
 	Exporters           []TracingExporter   `yaml:"exporters"`
 	Propagation         PropagationConfig   `yaml:"propagation"`
 	ResponseTraceHeader ResponseTraceHeader `yaml:"response_trace_id"`
+	Attributes          []CustomAttribute   `yaml:"attributes"`
 
 	TracingGlobalFeatures `yaml:",inline"`
 }
@@ -94,10 +95,18 @@ type Prometheus struct {
 	Path                string      `yaml:"path" envDefault:"/metrics" env:"PROMETHEUS_HTTP_PATH"`
 	ListenAddr          string      `yaml:"listen_addr" envDefault:"127.0.0.1:8088" env:"PROMETHEUS_LISTEN_ADDR"`
 	GraphqlCache        bool        `yaml:"graphql_cache" envDefault:"false" env:"PROMETHEUS_GRAPHQL_CACHE"`
+	ConnectionStats     bool        `yaml:"connection_stats" envDefault:"false" env:"PROMETHEUS_CONNECTION_STATS"`
 	EngineStats         EngineStats `yaml:"engine_stats" envPrefix:"PROMETHEUS_"`
 	ExcludeMetrics      RegExArray  `yaml:"exclude_metrics,omitempty" env:"PROMETHEUS_EXCLUDE_METRICS"`
 	ExcludeMetricLabels RegExArray  `yaml:"exclude_metric_labels,omitempty" env:"PROMETHEUS_EXCLUDE_METRIC_LABELS"`
 	ExcludeScopeInfo    bool        `yaml:"exclude_scope_info" envDefault:"false" env:"PROMETHEUS_EXCLUDE_SCOPE_INFO"`
+
+	SchemaFieldUsage PrometheusSchemaFieldUsage `yaml:"schema_usage" envPrefix:"PROMETHEUS_SCHEMA_FIELD_USAGE_"`
+}
+
+type PrometheusSchemaFieldUsage struct {
+	Enabled             bool `yaml:"enabled" envDefault:"false" env:"ENABLED"`
+	IncludeOperationSha bool `yaml:"include_operation_sha" envDefault:"false" env:"INCLUDE_OPERATION_SHA"`
 }
 
 type MetricsOTLPExporter struct {
@@ -119,6 +128,7 @@ type MetricsOTLP struct {
 	Enabled             bool                  `yaml:"enabled" envDefault:"true" env:"METRICS_OTLP_ENABLED"`
 	RouterRuntime       bool                  `yaml:"router_runtime" envDefault:"true" env:"METRICS_OTLP_ROUTER_RUNTIME"`
 	GraphqlCache        bool                  `yaml:"graphql_cache" envDefault:"false" env:"METRICS_OTLP_GRAPHQL_CACHE"`
+	ConnectionStats     bool                  `yaml:"connection_stats" envDefault:"false" env:"METRICS_OTLP_CONNECTION_STATS"`
 	EngineStats         EngineStats           `yaml:"engine_stats" envPrefix:"METRICS_OTLP_"`
 	ExcludeMetrics      RegExArray            `yaml:"exclude_metrics,omitempty" env:"METRICS_OTLP_EXCLUDE_METRICS"`
 	ExcludeMetricLabels RegExArray            `yaml:"exclude_metric_labels,omitempty" env:"METRICS_OTLP_EXCLUDE_METRIC_LABELS"`
@@ -241,7 +251,8 @@ type RequestHeaderRule struct {
 	Operation HeaderRuleOperation `yaml:"op"`
 	// Propagate options
 	// Matching is the regex to match the header name against
-	Matching string `yaml:"matching"`
+	Matching    string `yaml:"matching"`
+	NegateMatch bool   `yaml:"negate_match,omitempty"`
 	// Named is the exact header name to match
 	Named string `yaml:"named"`
 	// Rename renames the header's key to the provided value
@@ -285,7 +296,8 @@ type ResponseHeaderRule struct {
 	// Operation describes the header operation to perform e.g. "propagate"
 	Operation HeaderRuleOperation `yaml:"op"`
 	// Matching is the regex to match the header name against
-	Matching string `yaml:"matching"`
+	Matching    string `yaml:"matching"`
+	NegateMatch bool   `yaml:"negate_match,omitempty"`
 	// Named is the exact header name to match
 	Named string `yaml:"named"`
 	// Rename renames the header's key to the provided value
@@ -340,7 +352,9 @@ type EngineExecutionConfiguration struct {
 	WebSocketClientConnBufferSize                    int                      `envDefault:"128" env:"ENGINE_WEBSOCKET_CLIENT_CONN_BUFFER_SIZE" yaml:"websocket_client_conn_buffer_size,omitempty"`
 	WebSocketClientReadTimeout                       time.Duration            `envDefault:"5s" env:"ENGINE_WEBSOCKET_CLIENT_READ_TIMEOUT" yaml:"websocket_client_read_timeout,omitempty"`
 	WebSocketClientWriteTimeout                      time.Duration            `envDefault:"10s" env:"ENGINE_WEBSOCKET_CLIENT_WRITE_TIMEOUT" yaml:"websocket_client_write_timeout,omitempty"`
-	WebSocketClientPingInterval                      time.Duration            `envDefault:"10s" env:"ENGINE_WEBSOCKET_CLIENT_PING_INTERVAL" yaml:"websocket_client_ping_interval,omitempty"`
+	WebSocketClientPingInterval                      time.Duration            `envDefault:"15s" env:"ENGINE_WEBSOCKET_CLIENT_PING_INTERVAL" yaml:"websocket_client_ping_interval,omitempty"`
+	WebSocketClientPingTimeout                       time.Duration            `envDefault:"30s" env:"ENGINE_WEBSOCKET_CLIENT_PING_TIMEOUT" yaml:"websocket_client_ping_timeout,omitempty"`
+	WebSocketClientFrameTimeout                      time.Duration            `envDefault:"100ms" env:"ENGINE_WEBSOCKET_CLIENT_FRAME_TIMEOUT" yaml:"websocket_client_frame_timeout,omitempty"`
 	ExecutionPlanCacheSize                           int64                    `envDefault:"1024" env:"ENGINE_EXECUTION_PLAN_CACHE_SIZE" yaml:"execution_plan_cache_size,omitempty"`
 	MinifySubgraphOperations                         bool                     `envDefault:"true" env:"ENGINE_MINIFY_SUBGRAPH_OPERATIONS" yaml:"minify_subgraph_operations"`
 	EnablePersistedOperationsCache                   bool                     `envDefault:"true" env:"ENGINE_ENABLE_PERSISTED_OPERATIONS_CACHE" yaml:"enable_persisted_operations_cache"`
@@ -879,7 +893,7 @@ type MCPConfiguration struct {
 	Enabled                   bool             `yaml:"enabled" envDefault:"false" env:"MCP_ENABLED"`
 	Server                    MCPServer        `yaml:"server,omitempty"`
 	Storage                   MCPStorageConfig `yaml:"storage,omitempty"`
-	GraphName                 string           `yaml:"graph_name" envDefault:"cosmo" env:"MCP_GRAPH_NAME"`
+	GraphName                 string           `yaml:"graph_name" envDefault:"mygraph" env:"MCP_GRAPH_NAME"`
 	ExcludeMutations          bool             `yaml:"exclude_mutations" envDefault:"false" env:"MCP_EXCLUDE_MUTATIONS"`
 	EnableArbitraryOperations bool             `yaml:"enable_arbitrary_operations" envDefault:"false" env:"MCP_ENABLE_ARBITRARY_OPERATIONS"`
 	ExposeSchema              bool             `yaml:"expose_schema" envDefault:"false" env:"MCP_EXPOSE_SCHEMA"`
@@ -891,7 +905,13 @@ type MCPStorageConfig struct {
 }
 
 type MCPServer struct {
-	Port int `yaml:"port" envDefault:"5025" env:"MCP_SERVER_PORT"`
+	ListenAddr string `yaml:"listen_addr" envDefault:"localhost:5025" env:"MCP_SERVER_LISTEN_ADDR"`
+	BaseURL    string `yaml:"base_url,omitempty" env:"MCP_SERVER_BASE_URL"`
+}
+
+type PluginsConfiguration struct {
+	Enabled bool   `yaml:"enabled" envDefault:"false" env:"ENABLED"`
+	Path    string `yaml:"path" envDefault:"plugins" env:"PATH"`
 }
 
 type Config struct {
@@ -907,6 +927,7 @@ type Config struct {
 	TLS            TLSConfiguration   `yaml:"tls,omitempty"`
 	CacheControl   CacheControlPolicy `yaml:"cache_control_policy"`
 	MCP            MCPConfiguration   `yaml:"mcp,omitempty"`
+	DemoMode       bool               `yaml:"demo_mode,omitempty" envDefault:"false" env:"DEMO_MODE"`
 
 	Modules        map[string]interface{} `yaml:"modules,omitempty"`
 	Headers        HeaderRules            `yaml:"headers,omitempty"`
@@ -921,7 +942,7 @@ type Config struct {
 	PlaygroundEnabled             bool                        `yaml:"playground_enabled" envDefault:"true" env:"PLAYGROUND_ENABLED"`
 	IntrospectionEnabled          bool                        `yaml:"introspection_enabled" envDefault:"true" env:"INTROSPECTION_ENABLED"`
 	QueryPlansEnabled             bool                        `yaml:"query_plans_enabled" envDefault:"true" env:"QUERY_PLANS_ENABLED"`
-	LogLevel                      string                      `yaml:"log_level" envDefault:"info" env:"LOG_LEVEL"`
+	LogLevel                      zapcore.Level               `yaml:"log_level" envDefault:"info" env:"LOG_LEVEL"`
 	JSONLog                       bool                        `yaml:"json_log" envDefault:"true" env:"JSON_LOG"`
 	ShutdownDelay                 time.Duration               `yaml:"shutdown_delay" envDefault:"60s" env:"SHUTDOWN_DELAY"`
 	GracePeriod                   time.Duration               `yaml:"grace_period" envDefault:"30s" env:"GRACE_PERIOD"`
@@ -963,6 +984,21 @@ type Config struct {
 	ApolloCompatibilityFlags       ApolloCompatibilityFlags        `yaml:"apollo_compatibility_flags"`
 	ApolloRouterCompatibilityFlags ApolloRouterCompatibilityFlags  `yaml:"apollo_router_compatibility_flags"`
 	ClientHeader                   ClientHeader                    `yaml:"client_header"`
+
+	Plugins PluginsConfiguration `yaml:"plugins" envPrefix:"PLUGINS_"`
+
+	WatchConfig WatchConfig `yaml:"watch_config" envPrefix:"WATCH_CONFIG_"`
+}
+
+type WatchConfig struct {
+	Enabled      bool                    `yaml:"enabled" envDefault:"false" env:"ENABLED"`
+	Interval     time.Duration           `yaml:"interval" envDefault:"10s" env:"INTERVAL"`
+	StartupDelay WatchConfigStartupDelay `yaml:"startup_delay" envPrefix:"STARTUP_DELAY_"`
+}
+
+type WatchConfigStartupDelay struct {
+	Enabled bool          `yaml:"enabled" envDefault:"false" env:"ENABLED"`
+	Maximum time.Duration `yaml:"maximum" envDefault:"10s" env:"MAXIMUM"`
 }
 
 type PlaygroundConfig struct {
@@ -972,21 +1008,16 @@ type PlaygroundConfig struct {
 }
 
 type LoadResult struct {
-	Config        Config
+	Config Config
+
+	// DefaultLoaded is set to true when no config is found at the default path and the defaults are used.
 	DefaultLoaded bool
 }
 
-func LoadConfig(configFilePath string, envOverride string) (*LoadResult, error) {
-	_ = godotenv.Load(".env.local")
-	_ = godotenv.Load()
-
-	if envOverride != "" {
-		_ = godotenv.Overload(envOverride)
-	}
-
+func LoadConfig(configFilePath string) (*LoadResult, error) {
 	cfg := &LoadResult{
 		Config:        Config{},
-		DefaultLoaded: true,
+		DefaultLoaded: false,
 	}
 
 	// Try to load the environment variables into the config
@@ -997,21 +1028,11 @@ func LoadConfig(configFilePath string, envOverride string) (*LoadResult, error) 
 	}
 
 	// Read the custom config file
-
 	var configFileBytes []byte
-
-	if configFilePath == "" {
-		configFilePath = os.Getenv("CONFIG_PATH")
-		if configFilePath == "" {
-			configFilePath = DefaultConfigPath
-		}
-	}
-
-	isDefaultConfigPath := configFilePath == DefaultConfigPath
 	configFileBytes, err = os.ReadFile(configFilePath)
 	if err != nil {
-		if isDefaultConfigPath {
-			cfg.DefaultLoaded = false
+		if configFilePath == DefaultConfigPath {
+			cfg.DefaultLoaded = true
 		} else {
 			return nil, fmt.Errorf("could not read custom config file %s: %w", configFilePath, err)
 		}

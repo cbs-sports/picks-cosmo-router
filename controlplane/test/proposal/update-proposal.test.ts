@@ -1,7 +1,13 @@
 import { EnumStatusCode } from '@wundergraph/cosmo-connect/dist/common/common_pb';
 import { joinLabel } from '@wundergraph/cosmo-shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import { afterAllSetup, beforeAllSetup, genID, genUniqueLabel } from '../../src/core/test-util.js';
+import {
+  afterAllSetup,
+  beforeAllSetup, createTestGroup,
+  createTestRBACEvaluator,
+  genID,
+  genUniqueLabel
+} from '../../src/core/test-util.js';
 import { ClickHouseClient } from '../../src/core/clickhouse/index.js';
 import {
   createFederatedGraph,
@@ -82,11 +88,16 @@ describe('Update proposal tests', () => {
     await afterAllSetup(dbname);
   });
 
-  test('should update proposal state from DRAFT to APPROVED', async () => {
-    const { client, server } = await SetupTest({
+  test.each([
+    'organization-admin',
+    'organization-developer',
+    'graph-admin',
+  ])('%s should update proposal state from DRAFT to APPROVED', async (role) => {
+    const { client, server, authenticator, users } = await SetupTest({
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -134,6 +145,11 @@ describe('Update proposal tests', () => {
 
     expect(createProposalResponse.response?.code).toBe(EnumStatusCode.OK);
 
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({ role })),
+    });
+
     // Update the proposal state to APPROVED
     const updateProposalResponse = await client.updateProposal({
       proposalName,
@@ -158,11 +174,94 @@ describe('Update proposal tests', () => {
     await server.close();
   });
 
+  test.each([
+    'organization-apikey-manager',
+    'organization-viewer',
+    'namespace-admin',
+    'namespace-viewer',
+    'graph-viewer',
+    'subgraph-admin',
+    'subgraph-publisher',
+  ])('%s should not update proposal state from DRAFT to APPROVED', async (role) => {
+    const { client, server, authenticator, users } = await SetupTest({
+      dbname,
+      chClient,
+      setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
+    });
+
+    // Setup a federated graph with a single subgraph
+    const subgraphName = genID('subgraph1');
+    const fedGraphName = genID('fedGraph');
+    const label = genUniqueLabel('label');
+    const proposalName = genID('proposal');
+
+    const subgraphSchemaSDL = `
+      type Query {
+        hello: String!
+      }
+    `;
+
+    await createThenPublishSubgraph(
+      client,
+      subgraphName,
+      DEFAULT_NAMESPACE,
+      subgraphSchemaSDL,
+      [label],
+      DEFAULT_SUBGRAPH_URL_ONE,
+    );
+
+    await createFederatedGraph(client, fedGraphName, DEFAULT_NAMESPACE, [joinLabel(label)], DEFAULT_ROUTER_URL);
+
+    // Enable proposals for the namespace
+    const enableResponse = await enableProposalsForNamespace(client);
+    expect(enableResponse.response?.code).toBe(EnumStatusCode.OK);
+
+    // Create a proposal with a schema change to the subgraph
+    const updatedSubgraphSDL = `
+      type Query {
+        hello: String!
+        newField: Int!
+      }
+    `;
+
+    const createProposalResponse = await createTestProposal(client, {
+      federatedGraphName: fedGraphName,
+      proposalName,
+      subgraphName,
+      subgraphSchemaSDL,
+      updatedSubgraphSDL,
+    });
+
+    expect(createProposalResponse.response?.code).toBe(EnumStatusCode.OK);
+
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({ role })),
+    });
+
+    // Update the proposal state to APPROVED
+    const updateProposalResponse = await client.updateProposal({
+      proposalName,
+      federatedGraphName: fedGraphName,
+      namespace: DEFAULT_NAMESPACE,
+      updateAction: {
+        case: 'state',
+        value: 'APPROVED',
+      },
+    });
+
+    expect(updateProposalResponse.response?.code).toBe(EnumStatusCode.ERROR_NOT_AUTHORIZED);
+
+    await server.close();
+  });
+
   test('should update proposal state from DRAFT to CLOSED', async () => {
     const { client, server } = await SetupTest({
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -239,6 +338,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -335,6 +435,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with multiple subgraphs
@@ -488,6 +589,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with multiple subgraphs
@@ -634,6 +736,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -685,6 +788,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -847,6 +951,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -970,6 +1075,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1084,6 +1190,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1184,6 +1291,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1303,6 +1411,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with two subgraphs
@@ -1461,6 +1570,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with two subgraphs
@@ -1608,6 +1718,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with one existing subgraph
@@ -1718,6 +1829,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1800,6 +1912,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1914,6 +2027,7 @@ describe('Update proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph

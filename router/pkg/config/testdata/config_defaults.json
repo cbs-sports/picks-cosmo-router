@@ -25,6 +25,7 @@
         "Enabled": false,
         "HeaderName": "x-wg-trace-id"
       },
+      "Attributes": null,
       "ExportGraphQLVariables": false,
       "WithNewRoot": false
     },
@@ -34,6 +35,7 @@
         "Enabled": true,
         "RouterRuntime": true,
         "GraphqlCache": false,
+        "ConnectionStats": false,
         "EngineStats": {
           "Subscriptions": false
         },
@@ -46,12 +48,17 @@
         "Path": "/metrics",
         "ListenAddr": "127.0.0.1:8088",
         "GraphqlCache": false,
+        "ConnectionStats": false,
         "EngineStats": {
           "Subscriptions": false
         },
         "ExcludeMetrics": null,
         "ExcludeMetricLabels": null,
-        "ExcludeScopeInfo": false
+        "ExcludeScopeInfo": false,
+        "SchemaFieldUsage": {
+          "Enabled": false,
+          "IncludeOperationSha": false
+        }
       }
     }
   },
@@ -105,17 +112,19 @@
   "MCP": {
     "Enabled": false,
     "Server": {
-      "Port": 5025
+      "ListenAddr": "localhost:5025",
+      "BaseURL": ""
     },
     "Storage": {
       "ProviderID": ""
     },
-    "GraphName": "cosmo",
+    "GraphName": "mygraph",
     "ExcludeMutations": false,
     "EnableArbitraryOperations": false,
     "ExposeSchema": false,
     "RouterURL": ""
   },
+  "DemoMode": false,
   "Modules": null,
   "Headers": {
     "All": null,
@@ -314,7 +323,9 @@
     "WebSocketClientConnBufferSize": 128,
     "WebSocketClientReadTimeout": 5000000000,
     "WebSocketClientWriteTimeout": 10000000000,
-    "WebSocketClientPingInterval": 10000000000,
+    "WebSocketClientPingInterval": 15000000000,
+    "WebSocketClientPingTimeout": 30000000000,
+    "WebSocketClientFrameTimeout": 100000000,
     "ExecutionPlanCacheSize": 1024,
     "MinifySubgraphOperations": true,
     "EnablePersistedOperationsCache": true,
@@ -465,5 +476,17 @@
   "ClientHeader": {
     "Name": "",
     "Version": ""
+  },
+  "Plugins": {
+    "Enabled": false,
+    "Path": "plugins"
+  },
+  "WatchConfig": {
+    "Enabled": false,
+    "Interval": 10000000000,
+    "StartupDelay": {
+      "Enabled": false,
+      "Maximum": 10000000000
+    }
   }
 }

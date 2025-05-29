@@ -718,4 +718,47 @@ export class MetricsRepository {
       };
     });
   }
+
+  public async getOperations(props: GetMetricsViewProps) {
+    const { dateRange, organizationId, graphId, whereSql, queryParams } = this.getMetricsProps(props);
+
+    const query = `
+    WITH
+      toDateTime('${dateRange.start}') AS startDate,
+      toDateTime('${dateRange.end}') AS endDate
+    SELECT
+      OperationHash as operationHash,
+      OperationName as operationName,
+      OperationType as operationType,
+      func_rank(0.95, BucketCounts) as rank,
+      func_rank_bucket_lower_index(rank, BucketCounts) as b,
+      round(func_histogram_v2(
+          rank,
+          b,
+          BucketCounts,
+          anyLast(ExplicitBounds)
+      ), 2) as latency,
+
+      -- Histogram aggregations
+      sumForEachMerge(BucketCounts) as BucketCounts
+    FROM ${this.client.database}.operation_latency_metrics_5_30
+    WHERE Timestamp >= startDate AND Timestamp <= endDate
+      AND OrganizationID = '${organizationId}'
+      AND FederatedGraphID = '${graphId}'
+      ${whereSql ? `AND ${whereSql}` : ''}
+    GROUP BY OperationName, OperationHash, OperationType ORDER BY latency DESC`;
+
+    const res: {
+      operationHash: string;
+      operationName: string;
+      operationType: string;
+      latency: number;
+    }[] = await this.client.queryPromise(query, queryParams);
+
+    if (Array.isArray(res)) {
+      return res;
+    }
+
+    return [];
+  }
 }

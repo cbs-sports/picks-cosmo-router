@@ -1,8 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import { EnumStatusCode } from '@wundergraph/cosmo-connect/dist/common/common_pb';
 import { joinLabel } from '@wundergraph/cosmo-shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ClickHouseClient } from '../../src/core/clickhouse/index.js';
-import { afterAllSetup, beforeAllSetup, genID, genUniqueLabel } from '../../src/core/test-util.js';
+import {
+  afterAllSetup,
+  beforeAllSetup, createTestGroup,
+  createTestRBACEvaluator,
+  genID,
+  genUniqueLabel
+} from '../../src/core/test-util.js';
 import {
   createFederatedGraph,
   createThenPublishSubgraph,
@@ -51,11 +58,16 @@ describe('Create proposal tests', () => {
     await afterAllSetup(dbname);
   });
 
-  test('should successfully create a new proposal for a federated graph', async () => {
-    const { client, server } = await SetupTest({
+  test.each([
+    'organization-admin',
+    'organization-developer',
+    'graph-admin',
+  ])('%s should successfully create a new proposal for a federated graph', async (role) => {
+    const { client, server, authenticator, users } = await SetupTest({
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -93,6 +105,11 @@ describe('Create proposal tests', () => {
       }
     `;
 
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({ role })),
+    });
+
     const createProposalResponse = await client.createProposal({
       federatedGraphName: fedGraphName,
       namespace: DEFAULT_NAMESPACE,
@@ -129,11 +146,203 @@ describe('Create proposal tests', () => {
     await server.close();
   });
 
+  test('graph-admin should successfully create a new proposal for a federated graph on allowed namespace', async (role) => {
+    const { client, server, authenticator, users } = await SetupTest({
+      dbname,
+      chClient,
+      setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
+    });
+
+    // Setup a federated graph with a single subgraph
+    const subgraphName = genID('subgraph1');
+    const fedGraphName = genID('fedGraph');
+    const label = genUniqueLabel('label');
+    const proposalName = genID('proposal');
+
+    const subgraphSchemaSDL = `
+      type Query {
+        hello: String!
+      }
+    `;
+
+    const getNamespaceResponse = await client.getNamespace({ name: DEFAULT_NAMESPACE });
+    expect(getNamespaceResponse.response?.code).toBe(EnumStatusCode.OK);
+
+    await createThenPublishSubgraph(
+      client,
+      subgraphName,
+      DEFAULT_NAMESPACE,
+      subgraphSchemaSDL,
+      [label],
+      DEFAULT_SUBGRAPH_URL_ONE,
+    );
+
+    await createFederatedGraph(client, fedGraphName, DEFAULT_NAMESPACE, [joinLabel(label)], DEFAULT_ROUTER_URL);
+
+    // Enable proposals for the namespace
+    const enableResponse = await enableProposalsForNamespace(client);
+    expect(enableResponse.response?.code).toBe(EnumStatusCode.OK);
+
+    // Create a proposal with a schema change to the subgraph
+    const updatedSubgraphSDL = `
+      type Query {
+        hello: String!
+        newField: Int!
+      }
+    `;
+
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({
+        role: 'graph-admin',
+        namespaces: [getNamespaceResponse.namespace!.id],
+      })),
+    });
+
+    let createProposalResponse = await client.createProposal({
+      federatedGraphName: fedGraphName,
+      namespace: DEFAULT_NAMESPACE,
+      name: proposalName,
+      subgraphs: [
+        {
+          name: subgraphName,
+          schemaSDL: updatedSubgraphSDL,
+          isDeleted: false,
+          isNew: false,
+          labels: [],
+        },
+      ],
+    });
+
+    expect(createProposalResponse.response?.code).toBe(EnumStatusCode.OK);
+    expect(createProposalResponse.proposalId).toBeDefined();
+    expect(createProposalResponse.checkId).toBeDefined();
+
+    // Verify proposal was created
+    const proposalResponse = await client.getProposal({
+      proposalId: createProposalResponse.proposalId,
+    });
+
+    expect(proposalResponse.response?.code).toBe(EnumStatusCode.OK);
+    expect(proposalResponse.proposal?.name).toBe(proposalName);
+    expect(proposalResponse.proposal?.federatedGraphName).toBe(fedGraphName);
+    expect(proposalResponse.proposal?.state).toBe('DRAFT');
+    expect(proposalResponse.proposal?.subgraphs.length).toBe(1);
+    expect(proposalResponse.proposal?.subgraphs[0].name).toBe(subgraphName);
+    expect(proposalResponse.proposal?.subgraphs[0].schemaSDL).toBe(updatedSubgraphSDL);
+    expect(proposalResponse.proposal?.subgraphs[0].isDeleted).toBe(false);
+
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({
+        role: 'graph-admin',
+        namespaces: [randomUUID()],
+      })),
+    });
+
+    createProposalResponse = await client.createProposal({
+      federatedGraphName: fedGraphName,
+      namespace: DEFAULT_NAMESPACE,
+      name: proposalName,
+      subgraphs: [
+        {
+          name: subgraphName,
+          schemaSDL: updatedSubgraphSDL,
+          isDeleted: false,
+          isNew: false,
+          labels: [],
+        },
+      ],
+    });
+
+    expect(createProposalResponse.response?.code).toBe(EnumStatusCode.ERROR_NOT_AUTHORIZED);
+
+    await server.close();
+  });
+
+  test.each([
+    'organization-apikey-manager',
+    'organization-viewer',
+    'namespace-admin',
+    'namespace-viewer',
+    'graph-viewer',
+    'subgraph-admin',
+    'subgraph-publisher',
+  ])('%s should not successfully create a new proposal for a federated graph', async (role) => {
+    const { client, server, authenticator, users } = await SetupTest({
+      dbname,
+      chClient,
+      setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
+    });
+
+    // Setup a federated graph with a single subgraph
+    const subgraphName = genID('subgraph1');
+    const fedGraphName = genID('fedGraph');
+    const label = genUniqueLabel('label');
+    const proposalName = genID('proposal');
+
+    const subgraphSchemaSDL = `
+      type Query {
+        hello: String!
+      }
+    `;
+
+    await createThenPublishSubgraph(
+      client,
+      subgraphName,
+      DEFAULT_NAMESPACE,
+      subgraphSchemaSDL,
+      [label],
+      DEFAULT_SUBGRAPH_URL_ONE,
+    );
+
+    await createFederatedGraph(client, fedGraphName, DEFAULT_NAMESPACE, [joinLabel(label)], DEFAULT_ROUTER_URL);
+
+    // Enable proposals for the namespace
+    const enableResponse = await enableProposalsForNamespace(client);
+    expect(enableResponse.response?.code).toBe(EnumStatusCode.OK);
+
+    // Create a proposal with a schema change to the subgraph
+    const updatedSubgraphSDL = `
+      type Query {
+        hello: String!
+        newField: Int!
+      }
+    `;
+
+    authenticator.changeUserWithSuppliedContext({
+      ...users.adminAliceCompanyA,
+      rbac: createTestRBACEvaluator(createTestGroup({ role })),
+    });
+
+    const createProposalResponse = await client.createProposal({
+      federatedGraphName: fedGraphName,
+      namespace: DEFAULT_NAMESPACE,
+      name: proposalName,
+      subgraphs: [
+        {
+          name: subgraphName,
+          schemaSDL: updatedSubgraphSDL,
+          isDeleted: false,
+          isNew: false,
+          labels: [],
+        },
+      ],
+    });
+
+    expect(createProposalResponse.response?.code).toBe(EnumStatusCode.ERROR_NOT_AUTHORIZED);
+
+    await server.close();
+  });
+
   test('should create a proposal with multiple subgraph changes', async () => {
     const { client, server } = await SetupTest({
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with multiple subgraphs
@@ -266,6 +475,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -359,6 +569,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with multiple subgraphs
@@ -451,6 +662,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Enable proposals for the namespace
@@ -486,6 +698,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with multiple subgraphs
@@ -666,6 +879,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Don't enable proposals for the namespace
@@ -725,6 +939,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -813,6 +1028,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup common test data
@@ -936,6 +1152,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph
@@ -986,6 +1203,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
@@ -1067,6 +1285,7 @@ describe('Create proposal tests', () => {
       dbname,
       chClient,
       setupBilling: { plan: 'enterprise' },
+      enabledFeatures: ['proposals'],
     });
 
     // Setup a federated graph with a single subgraph
